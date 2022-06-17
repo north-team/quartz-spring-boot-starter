@@ -4,8 +4,10 @@ import com.fit2cloud.quartz.QuartzInstanceIdGenerator;
 import com.fit2cloud.quartz.SchedulerStarter;
 import com.fit2cloud.quartz.anno.QuartzDataSource;
 import com.fit2cloud.quartz.service.QuartzManageService;
+import com.fit2cloud.quartz.util.JobFactory;
 import com.fit2cloud.quartz.util.QuartzBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -28,6 +30,13 @@ public class QuartzAutoConfiguration {
     private DataSource dataSource;
 
     private QuartzProperties properties;
+
+    private JobFactory jobFactory;
+
+    @Autowired
+    public void setJobFactory(JobFactory jobFactory) {
+        this.jobFactory = jobFactory;
+    }
 
     public QuartzAutoConfiguration(DataSource dataSource, @QuartzDataSource ObjectProvider<DataSource> quartzDataSource, QuartzProperties properties) {
         this.dataSource = getDataSource(dataSource, quartzDataSource);
@@ -53,6 +62,12 @@ public class QuartzAutoConfiguration {
     @ConditionalOnProperty(prefix = "quartz", value = "enabled", havingValue = "true")
     public QuartzManageService quartzManageService() {
         return new QuartzManageService();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public JobFactory jobFactory() {
+        return new JobFactory();
     }
 
     @Bean
@@ -99,6 +114,7 @@ public class QuartzAutoConfiguration {
         if (!StringUtils.isEmpty(this.properties.getSchedulerName())) {
             schedulerFactoryBean.setBeanName(this.properties.getSchedulerName());
         }
+        schedulerFactoryBean.setJobFactory(jobFactory);
         return schedulerFactoryBean;
     }
 }

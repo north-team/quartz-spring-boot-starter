@@ -51,6 +51,8 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
 
     private ConfigurableApplicationContext applicationContext;
 
+    private final String ANNOTATION_JOB_GROUP = "ANNOTATION_JOB_GROUP";
+
     @Override
     public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
         return bean;
@@ -76,23 +78,29 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
                     if (!StringUtils.isEmpty(cron)) {
                         cron = getCronExpression(cron);
                         jobDetail = JobBuilder.newJob(ClusterQuartzJobBean.class)
+                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
                                 .storeDurably(true).usingJobData(jobDataMap).build();
-                        trigger = TriggerBuilder.newTrigger().withIdentity(jobDetailIdentity)
+                        trigger = TriggerBuilder.newTrigger()
+                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
                                 .startAt(new Date(now.plusMillis(initialDelay).toEpochMilli()))
                                 .withSchedule(CronScheduleBuilder.cronSchedule(cron).inTimeZone(quartzTimeZone))
                                 .build();
                     } else if (fixedDelay > 0) {
                         jobDataMap.put(FixedDelayJobListener.FIXED_DELAY_JOB_DATA, new FixedDelayJobData(fixedDelay));
                         jobDetail = JobBuilder.newJob(ClusterQuartzFixedDelayJobBean.class)
+                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
                                 .storeDurably(true).usingJobData(jobDataMap).build();
-                        trigger = TriggerBuilder.newTrigger().withIdentity(jobDetailIdentity)
+                        trigger = TriggerBuilder.newTrigger()
+                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
                                 .startAt(new Date(now.plusMillis(initialDelay).toEpochMilli()))
                                 .withSchedule(SimpleScheduleBuilder.simpleSchedule().withIntervalInMilliseconds(fixedDelay).repeatForever())
                                 .build();
                     } else {
                         jobDetail = JobBuilder.newJob(ClusterQuartzJobBean.class)
+                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
                                 .storeDurably(true).usingJobData(jobDataMap).build();
-                        trigger = TriggerBuilder.newTrigger().withIdentity(jobDetailIdentity)
+                        trigger = TriggerBuilder.newTrigger()
+                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
                                 .startAt(new Date(now.plusMillis(initialDelay).toEpochMilli()))
                                 .withSchedule(SimpleScheduleBuilder.simpleSchedule()
                                         .withIntervalInMilliseconds(fixedRate).repeatForever())
@@ -139,18 +147,13 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
 
 
     /**
-     * 获取数据库中的所有JobKey
+     * 获取数据库中的所有DEFAULT JobKey
      *
      * @return JobKey列表
      * @throws SchedulerException
      */
     private List<JobKey> getJobKeys() throws SchedulerException {
-        List<String> jobGroupNames = scheduler.getJobGroupNames();
-        List<JobKey> jobKeys = new ArrayList<>();
-        for (String jobGroupName : jobGroupNames) {
-            jobKeys.addAll(scheduler.getJobKeys(GroupMatcher.jobGroupEquals(jobGroupName)));
-        }
-        return jobKeys;
+        return new ArrayList<>(scheduler.getJobKeys(GroupMatcher.jobGroupEquals(ANNOTATION_JOB_GROUP)));
     }
 
     /**
@@ -160,12 +163,7 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
      * @throws SchedulerException
      */
     private List<TriggerKey> getTriggerKeys() throws SchedulerException {
-        List<String> triggerGroupNames = scheduler.getJobGroupNames();
-        List<TriggerKey> triggerKeys = new ArrayList<>();
-        for (String triggerGroupName : triggerGroupNames) {
-            triggerKeys.addAll(scheduler.getTriggerKeys(GroupMatcher.triggerGroupEquals(triggerGroupName)));
-        }
-        return triggerKeys;
+        return new ArrayList<>(scheduler.getTriggerKeys(GroupMatcher.triggerGroupEquals(ANNOTATION_JOB_GROUP)));
     }
 
     /**

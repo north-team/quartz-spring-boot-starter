@@ -1,6 +1,7 @@
 package com.fit2cloud.quartz;
 
 
+import com.fit2cloud.quartz.anno.AddQuartzJobs;
 import com.fit2cloud.quartz.anno.QuartzScheduled;
 import com.fit2cloud.quartz.config.ClusterQuartzFixedDelayJobBean;
 import com.fit2cloud.quartz.config.ClusterQuartzJobBean;
@@ -20,6 +21,7 @@ import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 
 import javax.annotation.Resource;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.*;
@@ -48,10 +50,9 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
     @Resource
     private TimeZone quartzTimeZone;
     private Map<String, JobDetailTrigger> jobDetailTriggerMap = new HashMap<>();
+    private Map<String, AddQuartzJobInfo> addQuartzJobMap = new HashMap<>();
 
     private ConfigurableApplicationContext applicationContext;
-
-    private final String ANNOTATION_JOB_GROUP = "ANNOTATION_JOB_GROUP";
 
     @Override
     public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
@@ -78,29 +79,26 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
                     if (!StringUtils.isEmpty(cron)) {
                         cron = getCronExpression(cron);
                         jobDetail = JobBuilder.newJob(ClusterQuartzJobBean.class)
-                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
                                 .storeDurably(true).usingJobData(jobDataMap).build();
                         trigger = TriggerBuilder.newTrigger()
-                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
+                                .withIdentity(jobDetailIdentity)
                                 .startAt(new Date(now.plusMillis(initialDelay).toEpochMilli()))
                                 .withSchedule(CronScheduleBuilder.cronSchedule(cron).inTimeZone(quartzTimeZone))
                                 .build();
                     } else if (fixedDelay > 0) {
                         jobDataMap.put(FixedDelayJobListener.FIXED_DELAY_JOB_DATA, new FixedDelayJobData(fixedDelay));
                         jobDetail = JobBuilder.newJob(ClusterQuartzFixedDelayJobBean.class)
-                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
                                 .storeDurably(true).usingJobData(jobDataMap).build();
                         trigger = TriggerBuilder.newTrigger()
-                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
+                                .withIdentity(jobDetailIdentity)
                                 .startAt(new Date(now.plusMillis(initialDelay).toEpochMilli()))
                                 .withSchedule(SimpleScheduleBuilder.simpleSchedule().withIntervalInMilliseconds(fixedDelay).repeatForever())
                                 .build();
                     } else {
                         jobDetail = JobBuilder.newJob(ClusterQuartzJobBean.class)
-                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
                                 .storeDurably(true).usingJobData(jobDataMap).build();
                         trigger = TriggerBuilder.newTrigger()
-                                .withIdentity(jobDetailIdentity,ANNOTATION_JOB_GROUP)
+                                .withIdentity(jobDetailIdentity)
                                 .startAt(new Date(now.plusMillis(initialDelay).toEpochMilli()))
                                 .withSchedule(SimpleScheduleBuilder.simpleSchedule()
                                         .withIntervalInMilliseconds(fixedRate).repeatForever())
@@ -108,9 +106,20 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
                     }
                     jobDetailTriggerMap.put(jobDetailIdentity, new JobDetailTrigger(jobDetail, trigger));
                 }
+                // 找到注解 @AddQuartzJob 标注的方法
+                addQuartzJob(bean, beanName,method);
             }
         }
         return bean;
+    }
+
+    private void addQuartzJob(Object bean, String beanName,Method method) {
+        AddQuartzJobs addQuartzJobs = AnnotationUtils.findAnnotation(method, AddQuartzJobs.class);
+        if (addQuartzJobs != null) {
+            AddQuartzJobInfo addQuartzJobInfo = new AddQuartzJobInfo(beanName, bean, method);
+            String methodName = method.getName();
+            addQuartzJobMap.put(beanName + "." + methodName, addQuartzJobInfo);
+        }
     }
 
     private String getCronExpression(String cron) {
@@ -137,11 +146,22 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
                 JobDetailTrigger jobDetailTrigger = this.jobDetailTriggerMap.get(jobDetailIdentity);
                 scheduler.scheduleJob(jobDetailTrigger.jobDetail, jobDetailTrigger.trigger);
             }
+            // 执行注解 @AddQuartzJob 标注的方法
+            executeAddQuartzJob();
             if (!scheduler.isShutdown()) {
                 scheduler.startDelayed(60);
             }
-        } catch (SchedulerException e) {
+        } catch (SchedulerException | InvocationTargetException | IllegalAccessException e) {
             e.printStackTrace();
+        }
+    }
+
+    private void executeAddQuartzJob() throws InvocationTargetException, IllegalAccessException {
+        for (String methodName : addQuartzJobMap.keySet()) {
+            AddQuartzJobInfo addQuartzJobInfo = addQuartzJobMap.get(methodName);
+            Method method = addQuartzJobInfo.getMethod();
+            Object bean = addQuartzJobInfo.getBean();
+            method.invoke(bean);
         }
     }
 
@@ -153,7 +173,12 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
      * @throws SchedulerException
      */
     private List<JobKey> getJobKeys() throws SchedulerException {
-        return new ArrayList<>(scheduler.getJobKeys(GroupMatcher.jobGroupEquals(ANNOTATION_JOB_GROUP)));
+        List<String> jobGroupNames = scheduler.getJobGroupNames();
+        List<JobKey> jobKeys = new ArrayList<>();
+        for (String jobGroupName : jobGroupNames) {
+            jobKeys.addAll(scheduler.getJobKeys(GroupMatcher.jobGroupEquals(jobGroupName)));
+        }
+        return jobKeys;
     }
 
     /**
@@ -163,7 +188,12 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
      * @throws SchedulerException
      */
     private List<TriggerKey> getTriggerKeys() throws SchedulerException {
-        return new ArrayList<>(scheduler.getTriggerKeys(GroupMatcher.triggerGroupEquals(ANNOTATION_JOB_GROUP)));
+        List<String> triggerGroupNames = scheduler.getJobGroupNames();
+        List<TriggerKey> triggerKeys = new ArrayList<>();
+        for (String triggerGroupName : triggerGroupNames) {
+            triggerKeys.addAll(scheduler.getTriggerKeys(GroupMatcher.triggerGroupEquals(triggerGroupName)));
+        }
+        return triggerKeys;
     }
 
     /**
@@ -187,4 +217,41 @@ public class SchedulerStarter implements BeanPostProcessor, ApplicationContextAw
             this.trigger = trigger;
         }
     }
+
+    private static class AddQuartzJobInfo {
+        String beanName;
+        Object bean;
+        Method method;
+
+        public AddQuartzJobInfo(String beanName, Object bean, Method method) {
+            this.beanName = beanName;
+            this.bean = bean;
+            this.method = method;
+        }
+
+        public String getBeanName() {
+            return beanName;
+        }
+
+        public void setBeanName(String beanName) {
+            this.beanName = beanName;
+        }
+
+        public Object getBean() {
+            return bean;
+        }
+
+        public void setBean(Object bean) {
+            this.bean = bean;
+        }
+
+        public Method getMethod() {
+            return method;
+        }
+
+        public void setMethod(Method method) {
+            this.method = method;
+        }
+    }
+
 }

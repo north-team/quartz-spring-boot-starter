@@ -16,10 +16,13 @@ import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
+import org.springframework.scheduling.quartz.LocalDataSourceJobStore;
 import org.springframework.scheduling.quartz.SchedulerFactoryBean;
 import org.springframework.util.StringUtils;
 
 import javax.sql.DataSource;
+import javax.annotation.Resource;
 import java.util.Properties;
 import java.util.TimeZone;
 
@@ -32,6 +35,9 @@ public class QuartzAutoConfiguration {
     private QuartzProperties properties;
 
     private JobFactory jobFactory;
+
+    @Resource
+    private Environment env;
 
     @Autowired
     public void setJobFactory(JobFactory jobFactory) {
@@ -99,7 +105,7 @@ public class QuartzAutoConfiguration {
         }
         props.put("org.quartz.scheduler.instanceId", "AUTO"); // 集群下的instanceId 必须唯一
         props.put("org.quartz.scheduler.instanceIdGenerator.class", QuartzInstanceIdGenerator.class.getName());// instanceId 生成的方式
-        props.put("org.quartz.jobStore.class", "org.quartz.impl.jdbcjobstore.JobStoreTX");
+        props.put("org.quartz.jobStore.class", env.getProperty("org.quartz.jobStore.class", LocalDataSourceJobStore.class.getName()));
         props.put("org.quartz.jobStore.driverDelegateClass", "org.quartz.impl.jdbcjobstore.StdJDBCDelegate");
         props.put("org.quartz.jobStore.tablePrefix", "QRTZ_");
         props.put("org.quartz.jobStore.isClustered", "true");
